@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+/* ==================================================================== */
+/*  EGG INSPECTION — "Industrial Vision OS"                            */
+/*  A composed inspection workspace, not a dashboard.                  */
+/*                                                                    */
+/*  Principles:                                                        */
+/*  · The camera is the instrument; everything orbits it.             */
+/*  · Depth by layering + contrast + translucency, never shadow.      */
+/*  · Motion communicates state only.                                 */
+/*  · Typography is a deliberate scale, not "label + number" repeats. */
+/*  · Colour carries meaning only.                                    */
+/*                                                                    */
+/*  Token layers: primitive -> semantic -> component.                */
+/* ==================================================================== */
+
+/* ------------------------------------------------------------------ */
+/*  PRIMITIVES                                                         */
+/* ------------------------------------------------------------------ */
+@theme {
+  /* room — warm graphite, layered neutrals (no blue cast) */
+  --color-room-0: #100d09;   /* absolute base — warm near-black        */
+  --color-room-1: #16120d;   /* primary surface                       */
+  --color-room-2: #1e1811;   /* raised surface                        */
+  --color-room-3: #292015;   /* interactive / hovered surface         */
+  --color-rule-0: #261f15;   /* hairline, quiet                       */
+  --color-rule-1: #3a2f20;   /* hairline, standard                    */
+  --color-rule-2: #57472f;   /* hairline, strong                      */
+
+  /* text primitives — warm paper whites */
+  --color-tx-0: #f3ede2;     /* primary                               */
+  --color-tx-1: #cbbfa8;     /* secondary                             */
+  --color-tx-2: #92846c;     /* metadata                              */
+  --color-tx-3: #6b5f4c;     /* least prominent / faint               */
+
+  /* meaning system — restrained, instrument-grade */
+  --color-ok: #58d18f;       /* normal outcome                        */
+  --color-ok-dim: #3cab6c;
+  --color-ok-soft: rgba(88, 209, 143, 0.13);
+  --color-bad: #e56d5f;      /* defect outcome (controlled, warm)      */
+  --color-bad-dim: #c04d3f;
+  --color-bad-soft: rgba(229, 109, 95, 0.12);
+  --color-visharp: #e8a83c;  /* vision accent — instrument amber      */
+  --color-visoft: #f2c069;
+  --color-vidim: #b9822a;
+  --color-cmute: #d9b453;    /* caution / attention                   */
+
+  /* type */
+  --font-sans: "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", "Cascadia Mono", "Consolas", ui-monospace, monospace;
+  --font-instr: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+/* ------------------------------------------------------------------ */
+/*  SEMANTIC + COMPONENT                                             */
+/* ------------------------------------------------------------------ */
+
+html { color-scheme: dark; }
+
+body {
+  margin: 0;
+  background-color: var(--color-room-0);
+  /* whisper of instrument light from above — layering, not a blob */
+  background-image:
+    radial-gradient(1400px 800px at 50% -20%, rgba(232, 168, 60, 0.06), transparent 55%);
+  color: var(--color-tx-0);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+/* instrumentation — monospaced tabular figures; lock numbers in place */
+.instr {
+  font-family: var(--font-instr);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: 0;
+}
+
+/* quiet operator label — used sparingly as telemetry captions */
+.tel-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-tx-3);
+}
+
+/* translucent scrim behind floating controls/legends on the feed */
+.scrim {
+  background: linear-gradient(to bottom, rgba(5, 7, 11, 0.55), rgba(5, 7, 11, 0.12));
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-vidim);
+  outline-offset: 2px;
+}
+
+/* the one accent that may breathe — signalling the line is running */
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.live-signal { animation: breathe 2.4s ease-in-out infinite; }
+
+/* low-voltage scan across the chamber while frames classify */
+@keyframes sweep {
+  from { transform: translateY(-110%); }
+  to { transform: translateY(110%); }
+}
+.scan { animation: sweep 3.4s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .live-signal, .scan { animation: none !important; }
+}
