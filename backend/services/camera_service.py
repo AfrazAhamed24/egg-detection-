@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from detection.annotate import draw_frame
 from detection.counter import EggCounter, build_status_mapping
-from detection.model import CONFIDENCE_THRESHOLD, get_model, track
+from detection.model import CONFIDENCE_THRESHOLD, get_model, reset_tracker, track
 
 CAMERA_RECONNECT_ATTEMPTS = 3
 RECONNECT_DELAY_S = 0.5
@@ -84,7 +84,11 @@ class CameraService:
             # Begin a fresh counting session. ByteTrack may reuse track IDs
             # across a restart, and a stale "counted" flag would silently
             # suppress a new egg that received a recycled ID. A fresh counter
-            # keeps "count exactly once" intact across stop -> start.
+            # keeps "count exactly once" intact across stop -> start. The
+            # tracker reset also drops any leftover ByteTrack state so a
+            # recycled track ID in the next session cannot inherit a stale
+            # "counted" suppression.
+            reset_tracker()
             self._counter = EggCounter(line_y_fraction=self._line_y_fraction)
             self._active_tracks = 0
 
@@ -101,6 +105,20 @@ class CameraService:
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
         return self.status
+
+    def shutdown(self) -> None:
+        """Release the camera and worker thread during process shutdown."""
+        with self._lock:
+            self._stop_event.set()
+            thread, self._thread = self._thread, None
+            cap, self._cap = self._cap, None
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=2.0)
+        if cap is not None:
+            try:
+                cap.release()
+            except Exception:
+                pass
 
     def reset(self) -> dict:
         with self._lock:

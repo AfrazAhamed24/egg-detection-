@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import cv2
@@ -14,6 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from services.camera_service import CameraService
 
 DEBUG = os.environ.get("EGG_DEBUG", "1") == "1"
+# By default we bind to the loopback so the unauthenticated camera control
+# surface is not exposed to the LAN. Operators who intentionally want remote
+# access can set EGG_HOST=0.0.0.0 — but they MUST put the service behind an
+# authenticating reverse proxy (the API itself has no auth).
 HOST = os.environ.get("EGG_HOST", "127.0.0.1")
 PORT = int(os.environ.get("EGG_PORT", "8000"))
 CORS_ORIGINS = os.environ.get(
@@ -23,9 +28,17 @@ CORS_ORIGINS = os.environ.get(
 CAMERA_INDEX = int(os.environ.get("EGG_CAMERA_INDEX", "0"))
 SNAPSHOT_INTERVAL_S = 0.12  # websocket ~8 updates/sec
 
-app = FastAPI(title="Egg Inspection API", version="0.2.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    camera_service.shutdown()
+
+
+app = FastAPI(title="Egg Inspection API", version="0.2.0", lifespan=lifespan)
 
 camera_service = CameraService(camera_index=CAMERA_INDEX)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,20 +77,45 @@ def _mjpeg_payload(jpeg: bytes) -> bytes:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "debug": DEBUG}
+    """Real pipeline health, not just "the process is alive"."""
+    snap = camera_service.snapshot()
+    err = snap.get("error")
+    running = bool(snap.get("running"))
+    if err:
+        status = "degraded"
+    elif not running:
+        status = "idle"
+    else:
+        status = "ok"
+    return {
+        "status": status,
+        "debug": DEBUG,
+        "running": running,
+        "error": err,
+    }
 
 
 @app.get("/api/status")
 def api_status() -> dict:
     snap = camera_service.snapshot()
+    err = snap.get("error")
+    running = bool(snap.get("running"))
+    if err:
+        status = "degraded"
+    elif not running:
+        status = "idle"
+    else:
+        status = "ok"
     return {
-        "running": snap["running"],
+        "status": status,
+        "debug": DEBUG,
+        "running": running,
+        "error": err,
         "total_eggs": snap["total_eggs"],
         "normal_eggs": snap["normal_eggs"],
         "cracked_eggs": snap["cracked_eggs"],
         "fps": snap["fps"],
         "active_tracks": snap["active_tracks"],
-        "error": snap["error"],
     }
 
 
@@ -146,6 +184,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             await asyncio.sleep(SNAPSHOT_INTERVAL_S)
     except WebSocketDisconnect:
         return
+
+
+@app.get("/api/export")
+def api_export() -> dict:
+    """Export the current inspection snapshot as JSON.
+    Clients should download the response body as a .json file.
+    """
+    snap = camera_service.snapshot()
+    return {
+        "snapshot": snap,
+        "timestamp": "now",  # client-side timestamp for accuracy
+    }
 
 
 if __name__ == "__main__":

@@ -41,6 +41,24 @@ def get_class_names() -> dict[int, str]:
     return get_model().names
 
 
+def reset_tracker() -> None:
+    """Drop ByteTrack state so the next tracking call starts a fresh session.
+
+    YOLO with `persist=True` keeps the tracker alive inside the model process;
+    without resetting it, a stop/start cycle would inherit stale track IDs
+    and could double-suppress fresh counts. We don't have a public API to
+    drop the underlying tracker, so we release the cached instance; the next
+    `get_model()` call will reload the weights with a clean tracker.
+    """
+    global _model
+    if _model is not None:
+        try:
+            del _model.predictor  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        _model = None
+
+
 def predict(frame, conf: float = 0.25, iou: float = 0.45) -> list[dict]:
     model = get_model()
     results = model.predict(

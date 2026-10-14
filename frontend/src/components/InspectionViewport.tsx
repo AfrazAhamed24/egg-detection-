@@ -8,6 +8,9 @@ interface InspectionViewportProps {
   error: string | null
   fps: number
   busy: boolean
+  feedOk?: boolean
+  onFeedError?: () => void
+  onFeedLoad?: () => void
   onStart: () => void
   onStop: () => void
   onReset: () => void
@@ -33,12 +36,14 @@ function Frame({ active, faulty }: { active: boolean; faulty: boolean }) {
 }
 
 /* Live feed — loaded only while the line runs, fading in on engage. */
-function Feed({ running }: { running: boolean }) {
+function Feed({ running, onError, onLoad }: { running: boolean; onError?: () => void; onLoad?: () => void }) {
   return (
     <motion.img
       key={running ? 'live' : 'idle'}
       src={running ? '/api/video' : undefined}
       alt="Live inspection feed"
+      onError={onError}
+      onLoad={onLoad}
       initial={{ opacity: 0 }}
       animate={{ opacity: running ? 1 : 0 }}
       transition={{ duration: 0.7, ease: 'easeOut' }}
@@ -171,11 +176,11 @@ function Console({
 }
 
 export function InspectionViewport({
-  isLive, running, error, fps, busy, onStart, onStop, onReset,
+  isLive, running, error, fps, busy, feedOk, onStart, onStop, onReset, onFeedError, onFeedLoad,
 }: InspectionViewportProps) {
-  // A fault is signalled by an active error, whether or not the line is
-  // still nominally running (model load failure or backend drop both count).
-  const faulty = !!error
+  // A fault is signalled by an active error or by a feed that isn't decoding
+  // frames, whether or not the line is still nominally running.
+  const faulty = !!error || (running && !feedOk)
 
   // "Connecting" — a brief start-up cue shown when the line is told to run.
   // It is self-limiting and deliberately NOT coupled to the WebSocket-backed
@@ -203,7 +208,7 @@ export function InspectionViewport({
       />
 
       {/* the feed — always mounted; fades in/out with the line state */}
-      <Feed running={running} />
+      <Feed running={running} onError={onFeedError} onLoad={onFeedLoad} />
 
       {/* low-voltage scan while frames classify */}
       {isLive && (

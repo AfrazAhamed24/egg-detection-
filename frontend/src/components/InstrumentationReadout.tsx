@@ -34,8 +34,8 @@ function Counter({ value, tone, label, live, primary = false }: {
   )
 }
 
-const GOOD = { tone: 'text-ok', marker: 'bg-ok' }
-const BAD = { tone: 'text-bad', marker: 'bg-bad' }
+const GOOD = { tone: 'text-ok', color: '#58d18f' }
+const BAD = { tone: 'text-bad', color: '#e56d5f' }
 
 export function InstrumentationReadout({ snap, crackRate, isLive }: {
   snap: InspectionSnapshot
@@ -52,6 +52,23 @@ export function InstrumentationReadout({ snap, crackRate, isLive }: {
   const rate = crackRate.toFixed(1).padStart(3, '0')
   const rateN = Math.min(100, crackRate)
   const hasDefects = snap.cracked_eggs > 0
+
+  // Persistent sparkline history in localStorage (last 10 values per metric)
+  const totalHistory = JSON.parse(localStorage.getItem('egg_total_hist') || '[]')
+  const goodHistory = JSON.parse(localStorage.getItem('egg_good_hist') || '[]')
+  const badHistory = JSON.parse(localStorage.getItem('egg_bad_hist') || '[]')
+
+  const updateHistory = (arr: number[], val: number) => {
+    const updated = [...arr, val].slice(-10)
+    localStorage.setItem(
+      arr === totalHistory ? 'egg_total_hist' : arr === goodHistory ? 'egg_good_hist' : 'egg_bad_hist',
+      JSON.stringify(updated)
+    )
+  }
+
+  updateHistory(totalHistory, snap.total_eggs)
+  updateHistory(goodHistory, snap.normal_eggs)
+  updateHistory(badHistory, snap.cracked_eggs)
 
   return (
     <div className="relative z-10 flex h-28 shrink-0 items-center justify-between gap-10 border-t border-rule-1 px-7">
@@ -78,7 +95,7 @@ export function InstrumentationReadout({ snap, crackRate, isLive }: {
             <span className="text-[10px] text-tx-3">%</span>
           </span>
         </div>
-        <div className="relative h-[3px] w-full overflow-hidden rounded-full bg-rule-0">
+        <div className="relative h-[4px] w-full overflow-hidden rounded-full bg-rule-0">
           <motion.div
             className="absolute inset-y-0 left-0 rounded-full"
             animate={{ width: `${rateN}%`, backgroundColor: hasDefects ? '#e56d5f' : '#57472f' }}

@@ -30,6 +30,25 @@ const EMPTY: InspectionSnapshot = {
 const WS_PROTOCOL = window.location.protocol === 'https:' ? 'wss' : 'ws'
 const WS_URL = `${WS_PROTOCOL}://${window.location.host}/ws`
 
+const EVENTS_KEY = 'egg_inspection_events'
+
+function loadEventsFromStorage(): InspectionEvent[] {
+  try {
+    const raw = localStorage.getItem(EVENTS_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+function saveEventsToStorage(events: InspectionEvent[]): void {
+  try {
+    localStorage.setItem(EVENTS_KEY, JSON.stringify(events))
+  } catch {
+    /* persist failure — non-fatal, UI continues with in-memory events */
+  }
+}
+
 async function readStatus(): Promise<InspectionSnapshot> {
   const res = await fetch('/api/status')
   if (!res.ok) throw new Error(`status ${res.status}`)
@@ -42,6 +61,11 @@ export function useInspection() {
   const [connection, setConnection] = useState<'connecting' | 'live' | 'offline'>('connecting')
   const [busy, setBusy] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
+  const [events, setEvents] = useState<InspectionEvent[]>(() => loadEventsFromStorage())
+
+  useEffect(() => {
+    saveEventsToStorage(events)
+  }, [events])
 
   useEffect(() => {
     let disposed = false
@@ -52,7 +76,7 @@ export function useInspection() {
         setSnap(s)
       })
       .catch(() => {
-        /* initial status fetch failure handled by WS state */ 
+        /* initial status fetch failure handled by WS state */
       })
 
     let socket: WebSocket | null = null
@@ -78,8 +102,25 @@ export function useInspection() {
 
       socket.onmessage = (ev) => {
         try {
-          const data = JSON.parse(ev.data) as Partial<InspectionSnapshot>
-          setSnap((prev) => ({ ...prev, ...data }))
+          const data = JSON.parse(ev.data) as { type?: string } & Partial<InspectionSnapshot> & {
+            label?: string
+            track?: number
+            at?: number
+          }
+          if (data.type === 'egg_event' && data.label && data.track !== undefined) {
+            const newEvent: InspectionEvent = {
+              at: (data.at as number) ?? Date.now(),
+              label: data.label as 'GOOD' | 'CRACKED',
+              track: typeof data.track === 'number' ? data.track : 0,
+            }
+            setEvents((prev) => {
+              const updated = [...prev, newEvent]
+              saveEventsToStorage(updated)
+              return updated
+            })
+          } else {
+            setSnap((prev) => ({ ...prev, ...(data as Partial<InspectionSnapshot>) }))
+          }
         } catch {
           /* ignore malformed frame */
         }
@@ -133,18 +174,32 @@ export function useInspection() {
   const stop = useCallback(() => post('/api/camera/stop'), [post])
   const reset = useCallback(() => post('/api/inspection/reset'), [post])
 
+  const exportData = useCallback(() => {
+    const payload = {
+      timestamp: new Date().toISOString(),
+      total_eggs: snap.total_eggs,
+      normal_eggs: snap.normal_eggs,
+      cracked_eggs: snap.cracked_eggs,
+      crackRate: snap.total_eggs > 0 ? (snap.cracked_eggs / snap.total_eggs) * 100 : 0,
+      fps: snap.fps,
+      active_tracks: snap.active_tracks,
+      error: snap.error,
+      events: events.slice(),
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `egg-inspection-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [snap, events])
+
   const crackRate =
     snap.total_eggs > 0 ? (snap.cracked_eggs / snap.total_eggs) * 100 : 0
 
   /* the line is actively inspecting: running and healthy, on a live link */
   const isLive = snap.running && !snap.error && connection === 'live'
-
-  /*
-   * Live inspection events. The backend exposes aggregates only (counts),
-   * not a per-egg log, so this is deliberately empty today. The UI renders
-   * this region's architecture without inventing data.
-   */
-  const events: InspectionEvent[] = []
 
   return {
     snap,
@@ -156,5 +211,6 @@ export function useInspection() {
     start,
     stop,
     reset,
+    exportData,
   }
 }

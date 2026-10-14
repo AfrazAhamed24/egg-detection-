@@ -55,14 +55,11 @@
 /*  SEMANTIC + COMPONENT                                             */
 /* ------------------------------------------------------------------ */
 
-html { color-scheme: dark; }
+html { color-scheme: dark; scrollbar-gutter: stable; }
 
 body {
   margin: 0;
-  background-color: var(--color-room-0);
-  /* whisper of instrument light from above — layering, not a blob */
-  background-image:
-    radial-gradient(1400px 800px at 50% -20%, rgba(232, 168, 60, 0.06), transparent 55%);
+  background-color: #0A0A0B;
   color: var(--color-tx-0);
   font-family: var(--font-sans);
   font-size: 14px;
@@ -71,6 +68,13 @@ body {
   text-rendering: optimizeLegibility;
   overscroll-behavior: none;
 }
+
+/* blog helpers */
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 999px; }
+::-webkit-scrollbar-track { background: transparent; }
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* instrumentation — monospaced tabular figures; lock numbers in place */
 .instr {

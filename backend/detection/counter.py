@@ -26,6 +26,14 @@ GRID_CELL = 140
 # After a counted cell has been empty for this many frames it is treated as a
 # vacated spot, so a genuinely new egg placed there later can be counted.
 CELL_EXPIRY_FRAMES = 20
+# A track that is unseen for this many frames is considered gone and its state
+# is dropped. Without this, `tracks` grows without bound on long runs and
+# `active_tracks` drifts upward even when no objects are present.
+TRACK_TTL_FRAMES = 30
+# Frames that an in-progress cell identification must lose its claim when the
+# cell becomes empty, preventing intermittent/sporadic detections from
+# accumulating into a false count.
+IDENTIFY_LOST_FRAMES = 5
 # Non-stationary (crossing) eggs also count, but only by committing once. See
 # the crossing path in `update`.
 
@@ -56,6 +64,8 @@ class TrackState:
         "pending",
         "settle_remaining",
         "cell",
+        "last_seen",
+        "consecutive_absent",
     )
 
     def __init__(self, track_id: int) -> None:
@@ -70,6 +80,8 @@ class TrackState:
         self.pending = False
         self.settle_remaining = 0
         self.cell: tuple[int, int] | None = None
+        self.last_seen: int = 0
+        self.consecutive_absent: int = 0
 
 
 class EggCounter:
@@ -83,8 +95,12 @@ class EggCounter:
         # so ByteTrack ID churn / bbox jitter on a stationary egg can never
         # double-count the same physical egg.
         self._frame = 0
+        # _cells[cell] -> consecutive frames the cell has been occupied by a
+        # detection. Reset to 0 when the cell is empty for IDENTIFY_LOST_FRAMES
+        # so noisy/intermittent sightings cannot accumulate into a false ID.
         self._cells: dict[tuple[int, int], int] = {}
         self._cell_status: dict[tuple[int, int], deque] = {}
+        self._cell_empty_frames: dict[tuple[int, int], int] = {}
         # cell -> last_occupied_frame. A counted cell is released only after it
         # has been genuinely empty for CELL_EXPIRY_FRAMES, and is refreshed
         # every frame its egg remains present, so a stationary egg is counted
@@ -141,8 +157,11 @@ class EggCounter:
             if self._frame - last < CELL_EXPIRY_FRAMES
         }
 
+        seen_track_ids: set[int] = set()
+
         for det in detections:
             track_id = det["track_id"]
+            seen_track_ids.add(track_id)
             state = self.tracks.get(track_id)
             if state is None:
                 state = TrackState(track_id)
@@ -154,6 +173,8 @@ class EggCounter:
             status = status_map.get(det["class_id"], "normal")
             state.status_votes.append(status)
             state.status = self._settled_status(state.status_votes)
+            state.last_seen = self._frame
+            state.consecutive_absent = 0
 
             cx, cy = self._centroid(state.bbox)
             cell = self._cell_of(cx, cy)
@@ -167,7 +188,15 @@ class EggCounter:
                 # recounts) and keep it from being released on this frame.
                 self._counted_cells[cell] = self._frame
                 state.counted = True
+                self._cells.pop(cell, None)
+                self._cell_status.pop(cell, None)
+                self._cell_empty_frames.pop(cell, None)
             elif not state.counted:
+                # Reset identification claim when the cell goes empty for a
+                # few consecutive frames. Otherwise noisy / intermittent
+                # detections on the same cell could keep accumulating and
+                # eventually be falsely counted as a stable egg.
+                self._cell_empty_frames[cell] = 0
                 self._cells[cell] = self._cells.get(cell, 0) + 1
                 votes = self._cell_status.setdefault(cell, deque(maxlen=STATUS_VOTE_WINDOW))
                 votes.append(status)
@@ -191,11 +220,38 @@ class EggCounter:
         # Finalize pending crossings on elapsed frames (even if the egg is not
         # seen this frame) so a real crossing is never dropped.
         for state in list(self.tracks.values()):
-            if not state.pending:
+            if state.pending:
+                state.settle_remaining -= 1
+                if state.settle_remaining <= 0:
+                    self._commit_crossing(state)
+
+        # Forget identification claims whose cells went empty for too long,
+        # and drop tracks ByteTrack hasn't reported for a while.
+        active_cells: set[tuple[int, int]] = set()
+        for det in detections:
+            cx, cy = self._centroid(det["bounding_box"])
+            active_cells.add(self._cell_of(cx, cy))
+        for cell in list(self._cells.keys()):
+            if cell in active_cells:
+                self._cell_empty_frames[cell] = 0
+            else:
+                self._cell_empty_frames[cell] = self._cell_empty_frames.get(cell, 0) + 1
+                if self._cell_empty_frames[cell] >= IDENTIFY_LOST_FRAMES:
+                    self._cells.pop(cell, None)
+                    self._cell_status.pop(cell, None)
+                    self._cell_empty_frames.pop(cell, None)
+
+        # Track expiry: a track ByteTrack hasn't reported for TRACK_TTL_FRAMES
+        # is dropped. This prevents unbounded memory growth and keeps
+        # `active_tracks` honest for the dashboard.
+        for tid in list(self.tracks.keys()):
+            state = self.tracks[tid]
+            if tid in seen_track_ids:
                 continue
-            state.settle_remaining -= 1
-            if state.settle_remaining <= 0:
-                self._commit_crossing(state)
+            state.consecutive_absent += 1
+            if state.consecutive_absent > TRACK_TTL_FRAMES:
+                del self.tracks[tid]
+
         return updated
 
     def _commit_crossing(self, state: TrackState) -> None:
